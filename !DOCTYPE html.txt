@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Vectra • Cotação Multi-tenant</title>
+  <style>
+    :root{
+      --bg:#0e0f12; --card:#10131a; --muted:#a6aec1; --text:#f6f8ff;
+      --accent:#3b82f6; --ok:#16a34a; --warn:#f59e0b; --err:#ef4444; --line:#23262d;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; background:linear-gradient(180deg,#0b0c10,#0f1117);
+      font-family: ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Ubuntu;
+      color:var(--text); padding:24px; display:flex; justify-content:center; align-items:flex-start;
+    }
+    .shell{width:100%; max-width:1100px}
+    .title{display:flex; gap:10px; align-items:center; margin:0 0 8px; font-weight:800; font-size:24px}
+    .sub{margin:0 0 16px; color:var(--muted)}
+    .grid{display:grid; grid-template-columns:1.2fr .8fr; gap:16px}
+    .card{background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px}
+    .row{display:grid; gap:12px}
+    .row.cols-2{grid-template-columns:1fr 1fr}
+    .row.cols-3{grid-template-columns:1fr 1fr 1fr}
+    .row.cols-4{grid-template-columns:1.2fr .8fr .8fr .8fr}
+    label{font-size:12px; color:var(--muted); display:block; margin-bottom:6px}
+    input,select,button{
+      width:100%; padding:12px 14px; border-radius:12px; border:1px solid #2a2f3a; background:#0e1117; color:var(--text); outline:none;
+    }
+    input::placeholder{color:#6b7280}
+    .btn{cursor:pointer; border:1px solid #2a2f3a; background:var(--accent)}
+    .btn.secondary{background:#0e1117}
+    .btn:disabled{opacity:.6; cursor:not-allowed}
+    .muted{color:var(--muted)} .ok{color:var(--ok)} .err{color:var(--err)}
+    .mono{font-variant-numeric: tabular-nums; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;}
+    .kpis{display:grid; grid-template-columns:repeat(3,1fr); gap:12px}
+    .kpi{background:#0e1117; border:1px solid var(--line); border-radius:12px; padding:12px}
+    .kpi h3{margin:0 0 4px; font-size:12px; color:var(--muted)}
+    .kpi p{margin:0; font-size:18px; font-weight:700}
+    .table{width:100%; border-collapse:collapse; overflow:auto; border:1px solid var(--line); border-radius:12px}
+    .table th,.table td{padding:8px 10px; border-bottom:1px solid var(--line); font-size:13px}
+    .table th{color:var(--muted); text-align:left; font-weight:600; background:#0e1117}
+    .table tfoot td{font-weight:700}
+    .actions{display:flex; gap:12px; align-items:center}
+    .pill{display:inline-flex; gap:8px; align-items:center; padding:8px 10px; border:1px solid var(--line); border-radius:999px; background:#0e1117; font-size:12px}
+    .map{display:none; margin-top:12px}
+    .foot{margin-top:8px; color:var(--muted); font-size:12px}
+    .divider{height:1px; background:var(--line); margin:12px 0}
+    .topbar{display:flex; justify-content:space-between; align-items:center; margin-bottom:12px}
+    .link{color:#9ec1ff; text-decoration:underline; cursor:pointer}
+    @media(max-width:1100px){ .grid{grid-template-columns:1fr} .kpis{grid-template-columns:1fr 1fr} }
+    @media(max-width:720px){ .kpis{grid-template-columns:1fr} .row.cols-4,.row.cols-3,.row.cols-2{grid-template-columns:1fr} }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <h1 class="title">Cotação de Frete — Multi-tenant</h1>
+  <p class="sub">Cada embarcador acessa seu **catálogo** e cota **separadamente**. **1 chamada** ao proxy por cotação; **mapa** só quando solicitado.</p>
+
+  <!-- ====== LOGIN / SESSÃO ====== -->
+  <div class="card" id="loginCard">
+    <div class="topbar">
+      <strong>Entrar</strong>
+      <span class="muted">Use o e-mail e senha do **seu embarcador**.</span>
+    </div>
+    <div class="row cols-3">
+      <div>
+        <label>E-mail</label>
+        <input id="email" type="email" placeholder="maria@embarcador.com.br"/>
+      </div>
+      <div>
+        <label>Senha</label>
+        <input id="senha" type="password" placeholder="••••••••"/>
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <button class="btn" id="btnLogin" type="button">Entrar</button>
+      </div>
+    </div>
+    <div class="foot" id="loginMsg"></div>
+  </div>
+
+  <div class="card" id="sessionCard" style="display:none">
+    <div class="topbar">
+      <div class="pill">
+        <span id="whoami">—</span>
+      </div>
+      <div class="actions">
+        <button class="btn secondary" id="btnLogout">Sair</button>
+        <span class="muted">Token expira em ~8h.</span>
+      </div>
+    </div>
+    <div class="foot">Após logar, o **catálogo** é carregado automaticamente para este embarcador.</div>
+  </div>
+
+  <div class="grid">
+
+    <!-- ====== COLUNA ESQUERDA: CATÁLOGO/ITENS ====== -->
+    <div class="card">
+      <h3 style="margin:0 0 12px">Catálogo de Produtos do Embarcador</h3>
+
+      <div class="row cols-4">
+        <div>
+          <label>Produto</label>
+          <select id="catalogSelect"><option value="">— Entre para carregar —</option></select>
+        </div>
+        <div>
+          <label>Qtd.</label>
+          <input id="qty" type="number" min="1" step="1" value="1"/>
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <button class="btn" id="btnAddItem" type="button">Adicionar</button>
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <button class="btn secondary" id="btnClearItems" type="button">Limpar itens</button>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div style="overflow:auto">
+        <table class="table" id="itensTable">
+          <thead>
+            <tr>
+              <th>Produto</th><th class="mono">Qtd</th><th class="mono">m³</th><th class="mono">Peso (kg)</th><th class="mono">R$ item</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="itensBody">
+            <tr><td colspan="6" class="muted">Sem itens. Adicione pelo seletor acima.</td></tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td style="text-align:right"><strong>Total</strong></td>
+              <td class="mono" id="tQtd">0</td>
+              <td class="mono" id="tM3">0,00</td>
+              <td class="mono" id="tPeso">0,00</td>
+              <td class="mono" id="tNF">R$ 0,00</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="foot">Dica: os **totais** preenchem automaticamente os campos de **cubagem**, **peso** e **valor de NF** da cotação (você pode ajustar manualmente).</div>
+    </div>
+
+    <!-- ====== COLUNA DIREITA: COTAÇÃO ====== -->
+    <div class="card">
+      <h3 style="margin:0 0 12px">Cotação</h3>
+
+      <form id="cotacaoForm" novalidate>
+        <div class="row cols-2">
+          <div>
+            <label>CEP Origem</label>
+            <input id="origemCEP" inputmode="numeric" placeholder="03171-020" required/>
+          </div>
+          <div>
+            <label>CEP Destino</label>
+            <input id="destinoCEP" inputmode="numeric" placeholder="69312-001" required/>
+          </div>
+        </div>
+
+        <div class="row cols-3" style="margin-top:12px">
+          <div>
+            <label>Tipo de Caminho</label>
+            <select id="tipoCaminho">
+              <option value="RAPIDA" selected>Rápida</option>
+              <option value="CURTA">Curta</option>
+              <option value="ECONOMICA">Econômica</option>
+            </select>
+          </div>
+          <div>
+            <label>Perfil de Veículo</label>
+            <select id="perfilVeiculo">
+              <option value="AUTO" selected>Automático (m³/peso)</option>
+              <option value="VUC">VUC</option>
+              <option value="TOCO">Toco</option>
+              <option value="TRUCK">Truck</option>
+              <option value="CARRETA">Carreta</option>
+            </select>
+          </div>
+            <div>
+            <label>Categoria Pedágio (opcional)</label>
+            <input id="categoriaPedagio" placeholder="auto por perfil (ex.: 8)"/>
+          </div>
+        </div>
+
+        <div class="row cols-3" style="margin-top:12px">
+          <div>
+            <label>m³ total (cubagem)</label>
+            <input id="m3" type="number" step="0.001" placeholder="12,400" required/>
+          </div>
+          <div>
+            <label>Peso total (kg)</label>
+            <input id="peso" type="number" step="0.01" placeholder="3200" required/>
+          </div>
+          <div>
+            <label>Valor de NF (R$)</label>
+            <input id="valorNF" type="number" step="0.01" placeholder="367783,37" required/>
+          </div>
+        </div>
+
+        <div class="actions" style="margin-top:12px">
+          <button id="btnCalc" class="btn" type="submit">Calcular frete</button>
+          <button id="btnMapa" class="btn secondary" type="button">Ver rota (mapa)</button>
+          <label class="pill" style="margin-left:auto">
+            <input id="chkSalvar" type="checkbox" style="accent-color:#3b82f6; width:auto"/> Salvar no histórico
+          </label>
+        </div>
+        <div id="msg" class="foot"></div>
+      </form>
+
+      <div class="divider"></div>
+
+      <div class="kpis">
+        <div class="kpi"><h3>KM</h3><p class="mono" id="kpiKm">—</p></div>
+        <div class="kpi"><h3>Pedágios</h3><p class="mono" id="kpiPed">—</p></div>
+        <div class="kpi"><h3>Piso ANTT</h3><p class="mono" id="kpiANTT">—</p></div>
+        <div class="kpi"><h3>Veículo</h3><p class="mono" id="kpiPerfil">—</p></div>
+        <div class="kpi"><h3>Modal</h3><p class="mono" id="kpiModal">—</p></div>
+        <div class="kpi"><h3>Preço Final</h3><p class="mono" id="kpiPreco">—</p></div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="row cols-3">
+        <div class="kpi"><h3>Valor/KM</h3><p class="mono" id="cmpVkm">—</p></div>
+        <div class="kpi"><h3>Base (KM × R$/KM)</h3><p class="mono" id="cmpBase">—</p></div>
+        <div class="kpi"><h3>AdValorem</h3><p class="mono" id="cmpAdv">—</p></div>
+      </div>
+      <div class="row cols-3" style="margin-top:12px">
+        <div class="kpi"><h3>GRIS</h3><p class="mono" id="cmpGris">—</p></div>
+        <div class="kpi"><h3>Cache</h3><p class="mono" id="cmpCache">—</p></div>
+        <div class="kpi"><h3>Status</h3><p class="mono" id="cmpStatus">Aguardando…</p></div>
+      </div>
+
+      <div class="map" id="mapWrap">
+        <h3 style="margin:12px 0 6px; font-size:14px; color:var(--muted)">Mapa da rota</h3>
+        <img id="mapImg" alt="Mapa da rota" style="width:100%; border-radius:12px; border:1px solid var(--line)"/>
+      </div>
+    </div>
+  </div>
+
+  <p class="foot">Economia: **/cotacao** só roda no clique. **Mapa** só quando solicitado. **Cache por tenant** ativo no proxy.</p>
+</div>
+
+<script>
+  /* =========================
+     CONFIGURAÇÃO
+     ========================= */
+  // 👉 Ajuste a URL da sua API (login/produtos/regras/cotações)
+  const API_BASE   = 'http://localhost:4000'; // troque para sua API em produção
+  // 👉 Seu proxy já existente (Manu)
+  const PROXY_BASE = 'https://5003-iyhbwoolks2e9swh6i3zw-b75ef921.manusvm.computer';
+
+  /* =========================
+     HELPERS
+     ========================= */
+  const $ = (id)=>document.getElementById(id);
+  const state = { token:null, tenant_id:null, user:null, catalog:[], itens:[] };
+
+  const fmtMoney = (n)=> (Number(n||0)).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  const fmtNum   = (n,d=2)=> (Number(n||0)).toLocaleString('pt-BR',{minimumFractionDigits:d, maximumFractionDigits:d});
+
+  function saveSession(){ localStorage.setItem('token', state.token||''); localStorage.setItem('tenant_id', state.tenant_id||''); localStorage.setItem('user', JSON.stringify(state.user||null)); }
+  function loadSession(){
+    state.token = localStorage.getItem('token') || null;
+    state.tenant_id = localStorage.getItem('tenant_id') || null;
+    try{ state.user = JSON.parse(localStorage.getItem('user')||'null'); }catch{ state.user = null; }
+  }
+  function clearSession(){ localStorage.clear(); state.token=null; state.tenant_id=null; state.user=null; }
+
+  function setLoggedUI(on){
+    $('loginCard').style.display = on ? 'none' : 'block';
+    $('sessionCard').style.display = on ? 'block' : 'none';
+    if(on){
+      $('whoami').textContent = `${state.user?.nome || 'Usuário'} — ${state.user?.tenant_nome || 'Tenant'}`;
+    } else {
+      $('whoami').textContent = '—';
+    }
+  }
+
+  async function api(path, options={}){
+    const headers = Object.assign({ 'Content-Type':'application/json' }, options.headers||{});
+    if(state.token) headers['Authorization'] = 'Bearer ' + state.token;
+    const resp = await fetch(API_BASE + path, Object.assign({}, options, { headers }));
+    if(resp.status === 401){ throw new Error('Sessão expirada. Faça login novamente.'); }
+    const data = await resp.json().catch(()=> ({}));
+    if(!resp.ok || data?.ok === false) throw new Error(data?.erro || 'Falha na API');
+    return data;
+  }
+
+  async function postJSON(base, path, payload){
+    const resp = await fetch(base + path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const data = await resp.json().catch(()=> ({}));
+    if(!resp.ok || data?.ok === false) throw new Error(data?.erro || 'Falha na requisição');
+    return data;
+  }
+
+  function calcM3(prod){ return (Number(prod.comprimento_cm)*Number(prod.largura_cm)*Number(prod.altura_cm))/1e6; }
+
+  function refreshItensTable(){
+    const body = $('itensBody');
+    body.innerHTML = '';
+    if(state.itens.length===0){
+      body.innerHTML = '<tr><td colspan="6" class="muted">Sem itens. Adicione pelo seletor acima.</td></tr>';
+    } else {
+      state.itens.forEach((it,idx)=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${it.nome}</td>
+          <td class="mono">${it.qtd}</td>
+          <td class="mono">${fmtNum(it.m3)}</td>
+          <td class="mono">${fmtNum(it.peso)}</td>
+          <td class="mono">${fmtMoney(it.total)}</td>
+          <td><button class="btn secondary" data-del="${idx}" type="button">remover</button></td>`;
+        body.appendChild(tr);
+      });
+    }
+    // Totais
+    const tQtd  = state.itens.reduce((s,i)=>s+i.qtd,0);
+    const tM3   = state.itens.reduce((s,i)=>s+i.m3,0);
+    const tPeso = state.itens.reduce((s,i)=>s+i.peso,0);
+    const tNF   = state.itens.reduce((s,i)=>s+i.total,0);
+    $('tQtd').textContent = tQtd;
+    $('tM3').textContent = fmtNum(tM3,3);
+    $('tPeso').textContent = fmtNum(tPeso,2);
+    $('tNF').textContent = fmtMoney(tNF);
+    // Preenche campos da cotação (pode editar depois)
+    if(tM3>0) $('m3').value = tM3.toFixed(3);
+    if(tPeso>0) $('peso').value = tPeso.toFixed(2);
+    if(tNF>0) $('valorNF').value = tNF.toFixed(2);
+
+    // click remover
+    body.querySelectorAll('button[data-del]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const idx = Number(btn.getAttribute('data-del'));
+        state.itens.splice(idx,1);
+        refreshItensTable();
+      });
+    });
+  }
+
+  function setLoading(on){
+    $('btnLogin').disabled = !!on;
+    $('btnCalc').disabled = !!on;
+    $('btnMapa').disabled = !!on;
+    $('cmpStatus').textContent = on ? 'Processando…' : 'Pronto';
+  }
+
+  function normalizeCEP(s){ return String(s||'').replace(/\D/g,'').replace(/(\d{5})(\d{3})/,'$1-$2'); }
+
+  function renderCotacao(r){
+    $('kpiKm').textContent = fmtNum(r.km,2);
+    $('kpiPed').textContent = fmtMoney(r.pedagios);
+    $('kpiANTT').textContent = r.pisoANTT ? fmtMoney(r.pisoANTT) : '—';
+    $('kpiPreco').textContent = fmtMoney(r.precoFinal);
+    $('kpiPerfil').textContent = r.perfilVeiculo || '—';
+    $('kpiModal').textContent = r.fracionadoOuDedicado || '—';
+    $('cmpVkm').textContent = (r.composicao?.valorKm ? fmtMoney(r.composicao.valorKm) : '—') + (r.composicao?.valorKm ? ' / km' : '');
+    $('cmpBase').textContent = fmtMoney(r.composicao?.precoBase || 0);
+    $('cmpAdv').textContent  = fmtMoney(r.composicao?.adValorem || 0);
+    $('cmpGris').textContent = fmtMoney(r.composicao?.gris || 0);
+    $('cmpCache').textContent = r.cache || '—';
+  }
+
+  /* =========================
+     LOGIN
+     ========================= */
+  $('btnLogin').addEventListener('click', async ()=>{
+    try{
+      setLoading(true);
+      $('loginMsg').textContent = '';
+      const email = $('email').value.trim();
+      const senha = $('senha').value;
+      if(!email || !senha) throw new Error('Informe e-mail e senha.');
+      const data = await api('/auth/login', { method:'POST', body: JSON.stringify({ email, senha }) });
+      state.token = data.token;
+      state.user = data.user;
+      state.tenant_id = data.user?.tenant_id;
+      saveSession();
+      setLoggedUI(true);
+      await carregarCatalogo();
+    }catch(err){
+      $('loginMsg').innerHTML = `<span class="err">Erro: ${err.message || err}</span>`;
+    }finally{
+      setLoading(false);
+    }
+  });
+  $('btnLogout').addEventListener('click', ()=>{
+    clearSession(); setLoggedUI(false);
+    $('catalogSelect').innerHTML = '<option value="">— Entre para carregar —</option>';
+    state.catalog=[]; state.itens=[]; refreshItensTable();
+  });
+
+  /* =========================
+     CATÁLOGO
+     ========================= */
+  async function carregarCatalogo(){
+    try{
+      const r = await api('/products'); // GET
+      state.catalog = r.data || [];
+      const sel = $('catalogSelect');
+      sel.innerHTML = '<option value="">— Selecione —</option>' + state.catalog.map(p=>(
+        `<option value="${p.id}">${p.nome}${p.sku?` (${p.sku})`:''} — ${fmtNum(calcM3(p),3)} m³ • ${fmtNum(p.peso_kg,2)} kg</option>`
+      )).join('');
+      $('loginMsg').innerHTML = `<span class="ok">Catálogo carregado (${state.catalog.length} itens).</span>`;
+    }catch(err){
+      $('loginMsg').innerHTML = `<span class="err">Falha ao carregar catálogo: ${err.message||err}</span>`;
+    }
+  }
+
+  $('btnAddItem').addEventListener('click', ()=>{
+    const id = $('catalogSelect').value;
+    const qtd = Math.max(1, Number($('qty').value || 1));
+    if(!id){ alert('Selecione um produto.'); return; }
+    const p = state.catalog.find(x=>x.id===id);
+    if(!p){ alert('Produto não encontrado.'); return; }
+    const m3 = calcM3(p) * qtd;
+    const peso = Number(p.peso_kg) * qtd;
+    const total = (Number(p.valor_unitario||0) * qtd);
+    state.itens.push({ id:p.id, nome:p.nome, qtd, m3, peso, total });
+    refreshItensTable();
+  });
+
+  $('btnClearItems').addEventListener('click', ()=>{
+    state.itens = []; refreshItensTable();
+  });
+
+  /* =========================
+     COTAÇÃO + MAPA + SALVAR
+     ========================= */
+  async function cotar(){
+    const origemCEP = normalizeCEP($('origemCEP').value);
+    const destinoCEP = normalizeCEP($('destinoCEP').value);
+    const tipoCaminho = $('tipoCaminho').value;
+    const perfilVeiculo = $('perfilVeiculo').value;
+    const categoriaPedagio = $('categoriaPedagio').value.trim() || undefined;
+    const m3 = Number(String($('m3').value).replace(',','.'));
+    const peso = Number(String($('peso').value).replace(',','.'));
+    const valorNF = Number(String($('valorNF').value).replace(',','.'));
+
+    if(!/^\d{5}-\d{3}$/.test(origemCEP) || !/^\d{5}-\d{3}$/.test(destinoCEP)) throw new Error('Informe CEPs válidos (00000-000).');
+    if(!(m3>0) || !(peso>0) || !(valorNF>0)) throw new Error('Informe m³, peso e valor de NF maiores que zero.');
+    if(!state.tenant_id) throw new Error('Faça login para associar a cotação ao seu embarcador.');
+
+    const payload = { tenantId: state.tenant_id, origemCEP, destinoCEP, m3, peso, valorNF, tipoCaminho, perfilVeiculo, categoriaPedagio };
+    const data = await postJSON(PROXY_BASE, '/cotacao', payload);
+    return { data, payload };
+  }
+
+  $('cotacaoForm').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    try{
+      setLoading(true);
+      $('msg').textContent = 'Calculando...';
+      $('cmpStatus').textContent = 'Processando…';
+      const { data, payload } = await cotar();
+      renderCotacao(data);
+      $('cmpStatus').textContent = data.cache === 'MISS' ? 'Calculado (MISS)' : `Calculado (${data.cache})`;
+      $('msg').innerHTML = '<span class="ok">Cotação concluída.</span>';
+
+      // Salvar no histórico (opcional)
+      if($('chkSalvar').checked){
+        try{
+          const body = {
+            origem_cep: payload.origemCEP, destino_cep: payload.destinoCEP,
+            m3_total: payload.m3, peso_total_kg: payload.peso, valor_nf: payload.valorNF,
+            tipo_caminho: payload.tipoCaminho, perfil_veiculo: data.perfilVeiculo,
+            modal: data.fracionadoOuDedicado, km: data.km, pedagios: data.pedagios,
+            piso_antt: data.pisoANTT, advalorem: data.composicao?.adValorem, gris: data.composicao?.gris,
+            preco_final: data.precoFinal, cache_status: data.cache
+          };
+          const r = await api('/quotes/save', { method:'POST', body: JSON.stringify(body) });
+          $('msg').innerHTML += ` <span class="ok">• Salvo (#${r.data?.id?.slice(0,8)||'...'})</span>`;
+        }catch(err){
+          $('msg').innerHTML += ` <span class="err">• Não foi possível salvar: ${err.message||err}</span>`;
+        }
+      }
+    }catch(err){
+      $('msg').innerHTML = `<span class="err">Erro: ${err.message || err}</span>`;
+      $('cmpStatus').textContent = 'Erro';
+    }finally{
+      setLoading(false);
+    }
+  });
+
+  $('btnMapa').addEventListener('click', async ()=>{
+    try{
+      setLoading(true);
+      const origemCEP = normalizeCEP($('origemCEP').value);
+      const destinoCEP = normalizeCEP($('destinoCEP').value);
+      const tipoCaminho = $('tipoCaminho').value;
+      if(!/^\d{5}-\d{3}$/.test(origemCEP) || !/^\d{5}-\d{3}$/.test(destinoCEP)) throw new Error('Informe CEPs válidos para gerar o mapa.');
+
+      const { mapa } = await postJSON(PROXY_BASE, '/mapa', { origemCEP, destinoCEP, tipoCaminho });
+      let src = '';
+      if(typeof mapa === 'string'){ src = mapa; }
+      else if(mapa?.url){ src = mapa.url; }
+      else if(mapa?.base64){ src = `data:image/png;base64,${mapa.base64}`; }
+      else throw new Error('Resposta sem URL/base64.');
+      $('mapImg').src = src;
+      $('mapWrap').style.display = 'block';
+      $('msg').innerHTML = '<span class="ok">Mapa gerado.</span>';
+    }catch(err){
+      $('msg').innerHTML = `<span class="err">Erro ao gerar mapa: ${err.message||err}</span>`;
+    }finally{
+      setLoading(false);
+    }
+  });
+
+  /* =========================
+     INICIALIZAÇÃO
+     ========================= */
+  loadSession();
+  setLoggedUI(!!state.token && !!state.tenant_id);
+  if(state.token && state.tenant_id){ carregarCatalogo().catch(()=>{}); }
+</script>
+</body>
+</html>
+server.js
++2
+-0
+
+const express = require('express');
+const axios = require('axios');
+const bodyParser = require('body-parser');
+const path = require('path');
+
+const app = express();
+app.use(bodyParser.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+app.post('/incoming', async (req, res) => {
+  const { number, message } = req.body;
+
+  try {
+    await axios.post('https://vectra-n8n.a8y119.easypanel.host/webhook/321b8ae2-f808-4ca0-a587-171bf0908794', {
+      number,
+      message
+    });
+    res.send({ success: true });
+  } catch (error) {
+    console.error('Erro ao enviar para N8N:', error.message);
+    res.status(500).send({ success: false, error: error.message });
+  }
+});
+
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => console.log(`Servidor ouvindo na porta ${PORT}`));
